@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Transposition Cipher</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .container { background: #1e1e1e; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-width: 900px; width: 100%; }
+        h2 { margin-top: 0; color: #ffffff; text-align: center; }
+        .tabs { display: flex; gap: 5px; margin-bottom: 25px; background: #2a2a2a; padding: 5px; border-radius: 8px; }
+        .tab-btn { flex: 1; padding: 12px; cursor: pointer; border: none; background: transparent; border-radius: 6px; font-weight: bold; color: #aaa; transition: 0.2s; }
+        .tab-btn.active { background: #333; color: #4facfe; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        .panel { display: none; flex-direction: column; gap: 20px; }
+        .panel.active { display: flex; }
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        input[type="number"], input[type="file"], textarea { padding: 12px; border: 1px solid #444; border-radius: 6px; font-size: 14px; background: #2a2a2a; color: #fff; }
+        button { padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+        .btn-primary { background: linear-gradient(to right, #4facfe 0%, #00f2fe 100%); color: #000; }
+        .btn-primary:hover { opacity: 0.9; }
+        .btn-primary:disabled { background: #555; cursor: not-allowed; color: #888; }
+        .btn-copy { background: #555; color: white; margin-top: 10px; }
+        video { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid #444; margin-top: 10px; background: #000; }
+        .key-container { position: relative; }
+        textarea { width: 100%; box-sizing: border-box; font-family: monospace; resize: none; word-break: break-all; }
+        .grid-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .progress-box { background: #333; padding: 15px; border-radius: 8px; text-align: center; display: none; font-weight: bold; color: #4facfe; }
+        .warning { font-size: 12px; color: #ffb74d; margin-top: -5px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>WebAssembly Video Scrambler</h2>
+        
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showPanel('scramble')">Scramble (Encrypt)</button>
+            <button class="tab-btn" onclick="showPanel('unscramble')">Unscramble (Decrypt)</button>
+        </div>
+
+        <!-- SCRAMBLE PANEL -->
+        <div id="scramble" class="panel active">
+            <div class="input-group">
+                <label>1. Select Video (MP4/WebM/MOV)</label>
+                <input type="file" id="scrambleInput" accept="video/*">
+            </div>
+            
+            <div class="grid-settings">
+                <div class="input-group">
+                    <label>Columns (Width)</label>
+                    <input type="number" id="cols" value="10" min="2" max="15">
+                </div>
+                <div class="input-group">
+                    <label>Rows (Height)</label>
+                    <input type="number" id="rows" value="10" min="2" max="15">
+                </div>
+            </div>
+            <p class="warning">Note: Grids larger than 15x15 may cause browsers to run out of memory.</p>
+
+            <button id="btnScramble" class="btn-primary" onclick="processVideo('scramble')">Scramble Video</button>
+            
+            <div id="scrambleOutput" style="display:none;">
+                <hr style="border-color:#444">
+                <label><strong>Generated Key:</strong></label>
+                <div class="key-container">
+                    <textarea id="generatedKey" readonly rows="3"></textarea>
+                    <button class="btn-copy" onclick="copyKey()">Copy Key to Clipboard</button>
+                </div>
+                
+                <div class="input-group" style="margin-top:20px">
+                    <label><strong>Scrambled Video:</strong></label>
+                    <video id="scrambleVideo" controls></video>
+                    <a id="scrambleDownload" class="btn-primary" style="text-align:center; text-decoration:none; display:inline-block; margin-top:10px;">Download Scrambled Video</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- UNSCRAMBLE PANEL -->
+        <div id="unscramble" class="panel">
+            <div class="input-group">
+                <label>1. Select Scrambled Video</label>
+                <input type="file" id="unscrambleInput" accept="video/*">
+            </div>
+            
+            <div class="input-group">
+                <label>2. Paste Compact Key</label>
+                <textarea id="inputKey" placeholder="e.g. 10x10|aB3f..." rows="3"></textarea>
+            </div>
+            
+            <button id="btnUnscramble" class="btn-primary" onclick="processVideo('unscramble')">Unscramble Video</button>
+            
+            <div id="unscrambleOutput" style="display:none;">
+                <hr style="border-color:#444">
+                <label><strong>Restored Video:</strong></label>
+                <video id="unscrambleVideo" controls></video>
+                <a id="unscrambleDownload" class="btn-primary" style="text-align:center; text-decoration:none; display:inline-block; margin-top:10px;">Download Restored Video</a>
+            </div>
+        </div>
+
+        <!-- Global Progress UI -->
+        <div id="progressBox" class="progress-box">
+            Loading WebAssembly Core... <br> <span style="font-size:12px; color:#aaa">(This is processed 100% securely on your device)</span>
+        </div>
+    </div>
+
+    <!-- Load FFmpeg WebAssembly -->
+    <script type="module">
+        import { FFmpeg } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/+esm';
+        import { fetchFile } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/+esm';
+
+        // Base62 Encoding for compact key
+        const CHARSET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        function toBase62(num) {
+            let s = "";
+            if (num === 0) return "00";
+            while (num > 0) {
+                s = CHARSET[num % 62] + s;
+                num = Math.floor(num / 62);
+            }
+            return s.padStart(2, '0');
+        }
+        function fromBase62(str) {
+            let num = 0;
+            for (let i = 0; i < str.length; i++) num = num * 62 + CHARSET.indexOf(str[i]);
+            return num;
+        }
+
+        // Shuffle algorithm
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        // UI Panel Toggling
+        window.showPanel = function(id) {
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            event.currentTarget.classList.add('active');
+        };
+
+        window.copyKey = function() {
+            const copyText = document.getElementById("generatedKey");
+            copyText.select();
+            navigator.clipboard.writeText(copyText.value);
+            alert("Key copied to clipboard!");
+        };
+
+        let ffmpeg = null;
+
+        async function loadFFmpeg() {
+            if (ffmpeg) return;
+            const progressBox = document.getElementById('progressBox');
+            progressBox.style.display = 'block';
+            progressBox.innerHTML = 'Downloading WebAssembly Engine...<br><span style="font-size:12px;color:#aaa">One-time download (~3MB)</span>';
+            
+            ffmpeg = new FFmpeg();
+            ffmpeg.on('progress', ({ progress, time }) => {
+                progressBox.innerHTML = `Processing Video: <strong>${Math.round(progress * 100)}%</strong>`;
+            });
+
+            await ffmpeg.load({
+                coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+                wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm',
+            });
+            progressBox.style.display = 'none';
+        }
+
+        // Generates the complex mathematical layout for FFmpeg to stitch the video back together
+        function buildFiltergraph(cols, rows, sequence) {
+            // 1. We MUST scale the video slightly so its width/height is cleanly divisible by (grid_size * 2).
+            // This prevents FFmpeg from crashing due to 1-pixel rounding errors and satisfies H264 codec requirements.
+            let fg = `[0:v]scale=w='ceil(iw/(${cols}*2))*(${cols}*2)':h='ceil(ih/(${rows}*2))*(${rows}*2)'[scaled];`;
+            
+            const n = cols * rows;
+            fg += `[scaled]split=${n}`;
+            for(let i=0; i<n; i++) fg += `[v${i}]`;
+            fg += `;`;
+
+            // 2. Crop into squares
+            for(let i=0; i<n; i++) {
+                const c = i % cols;
+                const r = Math.floor(i / cols);
+                fg += `[v${i}]crop=w='iw/${cols}':h='ih/${rows}':x='(iw/${cols})*${c}':y='(ih/${rows})*${r}'[c${i}];`;
+            }
+
+            // 3. Assemble rows horizontally
+            for(let r=0; r<rows; r++) {
+                for(let c=0; c<cols; c++) {
+                    const targetTileIndex = sequence[r * cols + c];
+                    fg += `[c${targetTileIndex}]`;
+                }
+                fg += `hstack=inputs=${cols}[r${r}];`;
+            }
+
+            // 4. Assemble columns vertically
+            for(let r=0; r<rows; r++) {
+                fg += `[r${r}]`;
+            }
+            fg += `vstack=inputs=${rows}[out]`;
+
+            return fg;
+        }
+
+        window.processVideo = async function(mode) {
+            const isScramble = mode === 'scramble';
+            const fileInput = document.getElementById(isScramble ? 'scrambleInput' : 'unscrambleInput');
+            const file = fileInput.files[0];
+            
+            if (!file) return alert("Please select a video file.");
+
+            let cols, rows, sequence = [];
+            
+            if (isScramble) {
+                cols = parseInt(document.getElementById('cols').value);
+                rows = parseInt(document.getElementById('rows').value);
+                let indices = Array.from({length: cols * rows}, (_, i) => i);
+                sequence = shuffle([...indices]);
+                
+                // Generate and display Base62 Key immediately
+                const compactData = sequence.map(n => toBase62(n)).join('');
+                document.getElementById('generatedKey').value = `${cols}x${rows}|${compactData}`;
+            } else {
+                const keyRaw = document.getElementById('inputKey').value.trim();
+                if (!keyRaw) return alert("Please paste the key.");
+                
+                try {
+                    const [dim, data] = keyRaw.split('|');
+                    [cols, rows] = dim.split('x').map(Number);
+                    
+                    let shuffled = [];
+                    for (let i = 0; i < data.length; i += 2) {
+                        shuffled.push(fromBase62(data.substring(i, i + 2)));
+                    }
+                    
+                    // Decrypt mathematically: Invert the array
+                    for(let i = 0; i < shuffled.length; i++) {
+                        sequence[shuffled[i]] = i;
+                    }
+                } catch (e) {
+                    return alert("Invalid key format!");
+                }
+            }
+
+            // UI Adjustments
+            const btn = document.getElementById(isScramble ? 'btnScramble' : 'btnUnscramble');
+            btn.disabled = true;
+            document.getElementById('progressBox').style.display = 'block';
+            document.getElementById(mode + 'Output').style.display = 'none';
+
+            try {
+                await loadFFmpeg();
+
+                // 1. Write file to WASM memory
+                await ffmpeg.writeFile('input.mp4', await fetchFile(file));
+
+                // 2. Generate the filtergraph mathematically
+                const fg = buildFiltergraph(cols, rows, sequence);
+
+                // 3. Execute FFmpeg Command
+                // -map 0:a? keeps audio synced perfectly. 
+                // -preset ultrafast uses the fastest CPU algorithm.
+                await ffmpeg.exec([
+                    '-i', 'input.mp4',
+                    '-filter_complex', fg,
+                    '-map', '[out]',
+                    '-map', '0:a?',     // Copy audio if it exists
+                    '-c:v', 'libx264',  // Standard video codec
+                    '-preset', 'ultrafast', 
+                    '-pix_fmt', 'yuv420p', // Ensure browser playback compatibility
+                    '-c:a', 'copy',     // Do not re-encode audio (zero quality loss)
+                    'output.mp4'
+                ]);
+
+                // 4. Read Result
+                const data = await ffmpeg.readFile('output.mp4');
+                const videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
+                const videoUrl = URL.createObjectURL(videoBlob);
+
+                // 5. Output to UI
+                const videoElement = document.getElementById(mode + 'Video');
+                const downloadLink = document.getElementById(mode + 'Download');
+                
+                videoElement.src = videoUrl;
+                downloadLink.href = videoUrl;
+                downloadLink.download = isScramble ? 'scrambled_video.mp4' : 'unscrambled_video.mp4';
+                
+                document.getElementById(mode + 'Output').style.display = 'block';
+
+            } catch (err) {
+                console.error(err);
+                alert("An error occurred during processing. See console for details.");
+            } finally {
+                btn.disabled = false;
+                document.getElementById('progressBox').style.display = 'none';
+            }
+        };
+    </script>
+</body>
+</html>
